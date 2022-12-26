@@ -9,7 +9,7 @@ app = web.Application()
 sio.attach(app)
 
 @sio.event
-def connect(sid, socket):
+def connect(sid, _):
     print(sid, 'connected')
 
 
@@ -28,6 +28,9 @@ async def set_exercise_id(sid, data):
 
 @sio.event
 async def send_video(sid, data):
+    # every time this get's called,
+    # a new frame of the video is received
+    # data is a base64 encoded string
     session = await sio.get_session(sid)
     if session.get('video') is None:
         session['video'] = []
