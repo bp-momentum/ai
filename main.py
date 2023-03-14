@@ -1,29 +1,140 @@
-import math
+from hashlib import sha256
+import json
 import random
-import time
+from urllib import request
 import socketio
 from aiohttp import web
+import os
+from threading import Lock
 
 sio = socketio.AsyncServer()
 app = web.Application()
 sio.attach(app)
 
+# =========== Env Data ===========
+# BACKEND_URL = "http://localhost:80"  // used to return feedback and fetch exercises
+# BACKEND_PSK = "secret"               // used to authenticate with the backend
+
+
+# ========= Session Data =========
+# {
+#    current_repetition: int,        // [0..n]
+#    exercise_id: string,            // global id of the exercise
+#    video: {                        // map of repetitions to frames
+#        0: [frame1, frame2, ...],   // base64 encoded frames
+#        1: [frame1, frame2, ...], 
+#        ...
+#    }
+#    set_uuid: string,               // id for the evaluation
+# }
+
+custom_session_lock = Lock()
+custom_session_data = {}
+
+BACKEND_URL = os.environ.get("BACKEND_URL")
+BACKEND_PSK = os.environ.get("BACKEND_PSK")
+
+if BACKEND_URL is None or BACKEND_PSK is None:
+    raise Exception("🛑 BACKEND_URL and BACKEND_PSK must be configured!")
+
+RATING_URL = BACKEND_URL + "/api/internal/rate"
+EXERCISE_URL = BACKEND_URL + "/api/getexercise"
+
 @sio.event
-def connect(sid, _):
+async def connect(sid, _):
+    with custom_session_lock:
+        custom_session_data[sid] = {}
+        custom_session_data[sid]['current_repetition'] = 0
     print(sid, 'connected')
 
 
+
 @sio.event
-def disconnect(sid):
+async def disconnect(sid):
+    # no need to lock here as this session is read-only
+    session = custom_session_data[sid]
+
+    # check that the session is valid and a set ended
+    if session.get('set_uuid') is None:
+        return
+    
+    values = {
+        "speed": 0,
+        "accuracy": 0,
+        "cleanliness": 0,
+    }
+
+    # TODO: fix this
+    if session.get('video') is None:
+        print("No video data received, aborting...")
+        return
+
+    for repetition in session['video']:
+        frames = session['video'][repetition]
+        # TODO: analyze the video here (for now, it's just some random numbers)
+        values['speed'] += random.randint(50, 100)
+        values['accuracy'] += random.randint(50, 100)
+        values['cleanliness'] += random.randint(50, 100)
+    
+    values['speed'] /= len(session['video'])
+    values['accuracy'] /= len(session['video'])
+    values['cleanliness'] /= len(session['video'])
+
+    checksum = sha256(f"{session['set_uuid']}{BACKEND_PSK}".encode()).hexdigest()
+
+    data = {
+        "set_uuid": session['set_uuid'],
+        "values": values,
+        "checksum": checksum,
+    }
+
+    # send the data to the backend
+    data = json.dumps(data).encode()
+    req = request.Request(RATING_URL, data=data, headers={'Content-Type': 'application/json'})
+    request.urlopen(req)
+
     print(sid, 'disconnected')
 
 
 @sio.event
 async def set_exercise_id(sid, data):
-    session = await sio.get_session(sid)
-    session['exercise_id'] = data
-    print(session['exercise_id'])
-    await sio.save_session(sid, session)
+    with custom_session_lock:
+        custom_session_data[sid]['exercise_id'] = data['exercise']
+    print(f"{sid} started {data['exercise']}")
+    # load exercise data from backend
+    data = json.dumps({"id": data['exercise']}).encode()
+    req = request.Request(EXERCISE_URL, data=data, headers={'Content-Type': 'application/json'})
+    response = request.urlopen(req)
+    exercise = response.read().decode()
+    exercise = json.loads(exercise)
+    ex_data = exercise.get('data')
+    if ex_data is None:
+        print("⚠️ No exercise data received, aborting...")
+        return
+    expectation = ex_data.get('expectation')
+    if expectation is None:
+        print("⚠️ No exercise expectation received, aborting...")
+        return
+    with custom_session_lock:
+        custom_session_data[sid]['expectation'] = expectation
+
+
+@sio.event
+async def end_repetition(sid):
+    current_rep = None
+    with custom_session_lock:
+        custom_session_data[sid]['current_repetition'] += 1
+        current_rep = custom_session_data[sid]['current_repetition']
+    print(f"{sid} ended repetition {current_rep}")
+
+
+@sio.event
+async def end_set(sid, data):
+    set_uuid = None
+    with custom_session_lock:
+        custom_session_data[sid]['set_uuid'] = data['set_uuid']
+        set_uuid = custom_session_data[sid]['set_uuid']
+    print(f"{sid} ended set {set_uuid}")
 
 
 @sio.event
@@ -31,52 +142,19 @@ async def send_video(sid, data):
     # every time this get's called,
     # a new frame of the video is received
     # data is a base64 encoded string
-    session = await sio.get_session(sid)
-    if session.get('video') is None:
-        session['video'] = []
-    session['video'].append(data)
-    if (session.get('last_analyzed') is None): 
-        session['last_analyzed'] = time.time()
-    await sio.save_session(sid, session)
-    
-    # asyncronously analyse the video here
+    with custom_session_lock:
+        session = custom_session_data[sid]
+        if session.get('video') is None:
+            session['video'] = {}
+        if session['video'].get(session['current_repetition']) is None:
+            session['video'][session['current_repetition']] = []
+        session['video'][session['current_repetition']].append(data)
 
-    time_since_last = time.time() - session['last_analyzed']
-    # 1 in 100 change
-    if random.randint(0, 100) == 0:
-        # send a random error
-        error_list = [
-            {
-                "en": "No person could be found in livestream",
-                "de": "Es konnte keine Person im video gefunden werden",
-            },
-            {
-                "en": "It seems to be too dark",
-                "de": "Es scheint zu dunkel zu sein",
-            },
-            {
-                "en": "It is not possible recognize an execution",
-                "de": "Es konnte keine Ausführung einer Übung erkannt werden",
-            },
-        ]
-        await sio.emit('information', random.choice(error_list), to=sid)
-    elif time_since_last > (random.random() * 2 + 2):  # 2 to 4 seconds
-        session['video'] = []  # debatable
-        session['last_analyzed'] = time.time()
+    # some live analysis is possible here, like so:
+    # sio.emit('live_feedback', {'feedback': '👍'}, room=sid)
+    # BUT: keep the processing time low, as this is blocking
+    # TODO: figure out a nice datatype for the feedback
 
-        feedback = {
-            "stats": {
-                "intensity": math.ceil(random.random() * 10000) / 200 + 50,
-                "speed": math.ceil(random.random() * 10000) / 200 + 50,
-                "cleanliness": math.ceil(random.random() * 10000) / 200 + 50,
-            },
-            "coordinates": {
-                "x": random.randint(0, 100),
-                "y": random.randint(0, 100),
-            },
-        }
-        print("send stats")
-        await sio.emit('statistics', feedback, to=sid)
 
 if __name__ == '__main__':
     web.run_app(app, port=80)
