@@ -56,6 +56,7 @@ async def disconnect(sid):
 
     # check that the session is valid and a set ended
     if session.get('set_uuid') is None:
+        print("No set_uuid received, aborting...")
         return
     
     values = {
@@ -120,7 +121,7 @@ async def set_exercise_id(sid, data):
 
 
 @sio.event
-async def end_repetition(sid):
+async def end_repetition(sid, _):
     current_rep = None
     with custom_session_lock:
         custom_session_data[sid]['current_repetition'] += 1
@@ -154,6 +155,9 @@ async def send_video(sid, data):
     # sio.emit('live_feedback', {'feedback': '👍'}, room=sid)
     # BUT: keep the processing time low, as this is blocking
     # TODO: figure out a nice datatype for the feedback
+
+    if random.random() < 0.01:
+        await sio.emit('live_feedback', {'feedback': '👍'}, room=sid)
 
 
 if __name__ == '__main__':
