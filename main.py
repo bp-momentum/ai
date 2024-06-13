@@ -310,6 +310,135 @@ async def send_video(sid, data):
     if random.random() < 0.01:
         await sio.emit('live_feedback', {'feedback': '👍'}, room=sid)
 
+    ###################################
+    ############## KEEP? ##############
+    ###################################
+
+    # session = await sio.get_session(sid)
+    # if session.get('video') is None:
+    #     session['video'] = []
+    # session['video'].append(data)
+    # if (session.get('last_analyzed') is None): 
+    #     session['last_analyzed'] = time.time()
+    # await sio.save_session(sid, session)
+    
+    # # asyncronously analyse the video here
+    # # with mp_pose.Pose(static_image_mode=True,
+    # #                   model_complexity=0,
+    # #                   enable_segmentation=False,
+    # #                   min_detection_confidence=0.2,
+    # #                  ) as static_pose:
+    # #     mediapipe_output_current_frame = call_mediapipe(static_pose, session['video'][-1])[0]
+    # # time_since_last = time.time() - session['last_analyzed']
+
+    # mediapipe_output_current_frame = 0
+
+    # # if no person is visible:
+    # if not check_for_person(mediapipe_output_current_frame):
+    #     # send a random error
+    #     error_list = [
+    #         {
+    #             "en": "No person could be found in livestream",
+    #             "de": "Es konnte keine Person im video gefunden werden",
+    #         },
+    #         {
+    #             "en": "It seems to be too dark",
+    #             "de": "Es scheint zu dunkel zu sein",
+    #         },
+    #         {
+    #             "en": "It is not possible recognize an execution",
+    #             "de": "Es konnte keine Ausführung einer Übung erkannt werden",
+    #         },
+    #     ]
+    #     await sio.emit('information', random.choice(error_list), to=sid)
+    # elif time_since_last > (random.random() * 2 + 2):  # 2 to 4 seconds
+    #     mediapipe_output = call_mediapipe(session['video'])
+    #     (intensity, speed, cleanliness) = analyse_motion(mediapipe_output)
+
+    #     session['video'] = []  # debatable
+    #     session['last_analyzed'] = time.time()
+
+    #     feedback = {
+    #         "stats": {
+    #             "intensity": intensity,
+    #             "speed": speed,
+    #             "cleanliness": cleanliness,
+    #         },
+    #         "coordinates": {
+    #             "x": random.randint(0, 100),
+    #             "y": random.randint(0, 100),
+    #         },
+    #     }
+    #     print("send stats")
+    #     await sio.emit('statistics', feedback, to=sid)
+
+
+def call_mediapipe(pose_model, video):
+    mediapipe_coordinates = []
+    for frame in video:
+        results = pose_model.process(frame)
+        xyz_list = []
+        for _,landmark in enumerate(results.pose_landmarks.landmark):
+            xyz_list.append(landmark.x)
+            xyz_list.append(landmark.y)
+            xyz_list.append(landmark.z)
+            xyz_list.append(landmark.visibility)
+        mediapipe_coordinates.append(xyz_list)
+        output_df = pd.DataFrame(mediapipe_coordinates)
+        body_parts = ["NOSE", "LEFT_EYE_INNER", "LEFT_EYE", "LEFT_EYE_OUTER", "RIGHT_EYE_INNER", "RIGHT_EYE", "RIGHT_EYE_OUTER", "LEFT_EAR", "RIGHT_EAR", "MOUTH_LEFT", "MOUTH_RIGHT", "LEFT_SHOULDER", "RIGHT_SHOULDER", "LEFT_ELBOW", "RIGHT_ELBOW", "LEFT_WRIST", 
+        "RIGHT_WRIST", "LEFT_PINKY", "RIGHT_PINKY", "LEFT_INDEX", "RIGHT_INDEX", "LEFT_THUMB", "RIGHT_THUMB", "LEFT_HIP", "RIGHT_HIP", "LEFT_KNEE", "RIGHT_KNEE", "LEFT_ANKLE", "RIGHT_ANKLE", "LEFT_HEEL", "RIGHT_HEEL", "LEFT_FOOT_INDEX", "RIGHT_FOOT_INDEX"]
+        column_names = []
+        for i in body_parts:
+            column_names.append(i+".x")
+            column_names.append(i+".y")
+            column_names.append(i+".z")
+            column_names.append(i+".visibility")
+        output_df = output_df.set_axis(column_names,axis=1)
+    return output_df
+
+def check_for_person(mediapipe_output):
+    # visible = 0
+    # hip_v_l = float(row[header.index("LEFT_HIP.visibility")])
+    # knee_v_l = float(row[header.index("LEFT_KNEE.visibility")])
+    # ankle_v_l = float(row[header.index("LEFT_ANKLE.visibility")])
+    # hip_v_r = float(row[header.index("RIGHT_HIP.visibility")])
+    # knee_v_r = float(row[header.index("RIGHT_KNEE.visibility")])
+    # ankle_v_r = float(row[header.index("RIGHT_ANKLE.visibility")])
+    
+    # shoulder_v_l = float(row[header.index("LEFT_SHOULDER.visibility")])
+    # elbow_v_l = float(row[header.index("LEFT_ELBOW.visibility")])
+    # wrist_v_l = float(row[header.index("LEFT_WRIST.visibility")])
+    # shoulder_v_r = float(row[header.index("RIGHT_SHOULDER.visibility")])
+    # elbow_v_r = float(row[header.index("RIGHT_ELBOW.visibility")])
+    # wrist_v_r = float(row[header.index("RIGHT_WRIST.visibility")])
+    # vis_lower_sum =  knee_v_l + ankle_v_l +  knee_v_r + ankle_v_r 
+    # vis_upper_sum = hip_v_l +hip_v_r +shoulder_v_l + elbow_v_l + wrist_v_l + shoulder_v_r + elbow_v_r + wrist_v_r
+                
+    # visibilty_up_avrg = vis_upper_sum/8
+    # visibilty_lo_avrg = vis_lower_sum/4
+    
+    # if visibilty_up_avrg > 0.3 and visibilty_lo_avrg > 0.3: 
+    #     visible = 1
+    visible = False
+    return visible
+
+def analyse_motion(mediapipe_output):
+    intensity = 0
+    speed = 0
+    cleanliness = 0
+    return intensity, speed, cleanliness
+
 
 if __name__ == '__main__':
+    # web.run_app(app, host="127.0.0.1", port=8083)
+    # web.run_app(app, host="127.0.0.1", port=80)
     web.run_app(app, port=80)
+
+
+# async def b():
+#     x = a()
+#     # something else
+#     x = await x
+
+# async def a():
+#     pass
