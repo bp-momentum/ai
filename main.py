@@ -54,7 +54,7 @@ if BACKEND_URL is None or BACKEND_PSK is None:
     raise Exception("🛑 BACKEND_URL and BACKEND_PSK must be configured!")
 
 RATING_URL = BACKEND_URL + "/api/internal/rate"
-EXERCISE_URL = lambda exid: f"{BACKEND_URL}/api/getexercise/{exid}/"
+EXERCISE_URL = BACKEND_URL + "/api/getexercise"
 
 @sio.event
 async def connect(sid, _):
@@ -254,7 +254,8 @@ async def set_exercise_id(sid, data):
         custom_session_data[sid]['exercise_id'] = data['exercise']
     print(f"{sid} started {data['exercise']}")
     # load exercise data from backend
-    req = request.Request(EXERCISE_URL(data['exercise']))
+    data = json.dumps({"id": data['exercise']}).encode()
+    req = request.Request(EXERCISE_URL, data=data, headers={'Content-Type': 'application/json'})
     response = request.urlopen(req)
     exercise = response.read().decode()
     exercise = json.loads(exercise)
